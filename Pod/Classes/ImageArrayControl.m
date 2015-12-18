@@ -11,6 +11,7 @@
 #import "SJAvatarBrowser.h"
 #import "Common.h"
 #import "UIImageView+WebCache.h"
+#import "UIImageViewWithUrl.h"
 
 @interface ImageArrayControl()<UIImagePickerControllerDelegate,UIActionSheetDelegate,UINavigationControllerDelegate,DelImageDelegate>
 
@@ -32,6 +33,7 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     if (self)
     {
         [self MyInit:point];
+        [self registerBlock];
     }
     return self;
 }
@@ -42,6 +44,7 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     if (self)
     {
         [self MyInit:point WithArray:arr];
+        [self registerBlock];
     }
     return self;
 }
@@ -66,14 +69,12 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     if (arr.count>0) {
         for (int i = 0 ; i<arr.count; i++) {
             width = width + HEIGHT_WIDTH_SPACE;
-            NSURL *url = [NSURL URLWithString:[arr objectAtIndex:i]];
-            UIImageView * view = [[UIImageView alloc] init];
-            [view sd_setImageWithURL:url placeholderImage:[UIImage imageNamed:@"DefaultImage"] completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-                [self.ImageArray addObject:view.image];
-                [self ChangeView:view];
-                [self HideAddBtn];
-            }];
-            
+            UIImageViewWithUrl * view = [[UIImageViewWithUrl alloc] init];
+            [view setImageWithPath:[NSString stringWithFormat:@"%@%@",IWHttpAddress,[NSURL URLWithString:[[arr objectAtIndex:i] substringFromIndex:1]]]];
+            view.urlStr = [arr objectAtIndex:i];
+            [self.originalImage addObject:[arr objectAtIndex:i]];
+            [self ChangeView:view];
+            [self HideAddBtn];
         }
     }
     self.frame = CGRectMake(point.x, point.y,width, height);
@@ -101,7 +102,6 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     [self openSwitch];
     
 }
-
 - (void)openSwitch
 {
     UIActionSheet *action = [[UIActionSheet alloc]initWithTitle:@"选择打开方式" delegate:self cancelButtonTitle:@"取消" destructiveButtonTitle:nil otherButtonTitles:@"打开相册",@"打开相机", nil];
@@ -131,12 +131,12 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     UIImage *image = info[UIImagePickerControllerEditedImage];
     NSData * data = UIImageJPEGRepresentation(image, 0.3f);
     UIImage * compressimage = [UIImage imageWithData:data];
-    [self.ImageArray addObject:compressimage];
-    UIImageView * img = [[UIImageView alloc]init];
-    img.image = compressimage;
-    [self ChangeView:img];
+   
     [picker dismissViewControllerAnimated:YES completion:nil];
-    [self HideAddBtn];
+    [MBProgressHUD showHUDAddedTo:self.controller.view animated:YES];
+    NSDictionary * dic = [NSDictionary dictionaryWithObjectsAndKeys:_uid,@"uid", nil];
+    [NetManager postRequestWithUrl:UploadImage_URL aDic:dic Image:compressimage Blcok:_successBlock blockFail:_responseFail blockError:_requestFailError];
+    
 }
 #pragma mark - private
 //实现删除图片方法
@@ -147,8 +147,22 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
         if (a.tag==tag) {
             NSLog(@"删除成功-----%ld",(long)tag);
             [a removeFromSuperview];
-            [self.ImageArray removeObject:[(UIImageView *)a image]];
-            if (_ImageArray.count<COUNT) {
+             UIImageViewWithUrl * image = (UIImageViewWithUrl *)a;
+            if (_isEdit) {
+                if ([_originalImage containsObject:image.urlStr]) {
+                    [self.originalImage removeObject:image.urlStr];
+                    [self.delImage addObject:image.urlStr];
+                }
+                else
+                {
+                    [self.addImage removeObject:image.urlStr];
+                }
+            }
+            else
+            {
+                [self.addImage removeObject:image.urlStr];
+            }
+            if ((_addImage.count+_originalImage.count)<COUNT) {
                 self.Btn_Add.hidden = false;
             }
         }
@@ -190,7 +204,6 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     img.tag = self.Btn_Add.tag;
     self.Btn_Add.tag ++;
     [img setUserInteractionEnabled:YES];
-    img.tag = _ImageArray.count;
     [img addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(WatchBigImage:)]];
     
     CGFloat width = HEIGHT_WIDTH_SPACE;
@@ -203,14 +216,13 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     _Btn_Add.frame = temp2;
     [self addSubview:img];
     
-    
 }
 /**
  *  隐藏添加按钮
  */
 -(void)HideAddBtn
 {
-    if (_ImageArray.count==COUNT) {
+    if ((_originalImage.count+_addImage.count)==COUNT) {
         _Btn_Add.hidden = true;
     }
 }
@@ -253,23 +265,57 @@ static const int  HEIGHT_WIDTH_SPACE = 50;//图片的宽高加上间隔
     
     return result;
 }
+//注册block
+-(void)registerBlock
+{
+    __block ImageArrayControl * blockself = self;
+    self.successBlock = ^(NSDictionary * dic)
+    {
+        [MBProgressHUD hideHUDForView:blockself.controller.view animated:YES];
+        NSString * path = dic[@"data"];
+        [blockself.addImage addObject:path];
+        UIImageViewWithUrl * img = [[UIImageViewWithUrl alloc]init];
+        img.urlStr = path;
+        [img setImageWithPath:[NSString stringWithFormat:@"%@%@",IWHttpAddress,[path substringFromIndex:1]]];
+        [blockself ChangeView:img];
+        [blockself HideAddBtn];
+    };
+    self.responseFail = ^(NSString * dic)
+    {
+        [MBProgressHUD hideHUDForView:blockself.controller.view animated:YES];
+        [MBProgressHUD showSuccess:@"上传失败" toView:blockself.controller.view];
+    };
+    self.requestFailError = ^(NSError * error)
+    {
+        [MBProgressHUD hideHUDForView:blockself.controller.view animated:YES];
+        [MBProgressHUD showSuccess:@"无法连接网络" toView:blockself.controller.view];
+    };
+}
 
 #pragma mark - getter
-//初始化图片集合
--(NSMutableArray *)ImageArray
+//原有图片
+-(NSMutableArray *)originalImage
 {
-    if (!_ImageArray) {
-        _ImageArray = [[NSMutableArray alloc] init];
+    if (!_originalImage) {
+        _originalImage = [[NSMutableArray alloc]init];
     }
-    return _ImageArray;
+    return _originalImage;
 }
-//初始化图片id集合
--(NSMutableArray *)IdArray
+//新增图片
+-(NSMutableArray *)addImage
 {
-    if (!_IdArray) {
-        _IdArray = [[NSMutableArray alloc] init];
+    if (!_addImage) {
+        _addImage = [[NSMutableArray alloc] init];
     }
-    return _IdArray;
+    return _addImage;
+}
+//删除图片
+-(NSMutableArray *)delImage
+{
+    if (!_delImage) {
+        _delImage = [[NSMutableArray alloc]init];
+    }
+    return _delImage;
 }
 //初始化阴影层
 -(UIView *)hideview

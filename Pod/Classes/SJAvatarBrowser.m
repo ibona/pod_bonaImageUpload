@@ -61,7 +61,7 @@ static CGRect oldframe;
 //    [btn setBackgroundColor:[UIColor whiteColor]];
 //    
 //    [btn setTitleColor:[UIColor redColor] forState:UIControlStateNormal];
-    [btn setBackgroundImage:[UIImage imageNamed:@"delete"] forState:UIControlStateNormal];
+    [btn setBackgroundImage:[UIImage imageNamed:@"delimg"] forState:UIControlStateNormal];
     
     btn.tag = avatarImageView.tag;
     
